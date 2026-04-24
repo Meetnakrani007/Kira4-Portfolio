@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { thumbUrl } from './platform/utils'
 import './Work.css'
 
 export default function Work({ work = [], category = 'projects', title, subtitle, id }) {
@@ -62,8 +63,8 @@ export default function Work({ work = [], category = 'projects', title, subtitle
               }}
             >
               <div className="work-img-wrapper">
-                {(item.thumbnail || item.imageUrl) ? (
-                  <img src={item.thumbnail || item.imageUrl} alt={item.title} className="work-img" />
+                {thumbUrl(item) ? (
+                  <img src={thumbUrl(item)} alt={item.title} className="work-img" />
                 ) : (
                   <div className="work-placeholder" style={{ background: item.color || '#0d0f1a' }}>
                     <span className="work-placeholder-num">KIR4</span>
