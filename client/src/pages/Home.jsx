@@ -211,7 +211,7 @@ export default function Home({ data }) {
   return (
     <div className="relative w-full h-full">
       <Hero data={data} />
-      <Marquee items={data.marqueeText} />
+      <Marquee items={data.creators && data.creators.length > 0 ? data.creators : data.marqueeText} />
 
       {/* ═══ SECTION 1: THUMBNAILS ═══ */}
       <section id="thumbnails" className="content-section">

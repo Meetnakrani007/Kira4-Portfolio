@@ -14,6 +14,7 @@ async function getSettings() {
       bio2: "",
       skills: [],
       marqueeText: "",
+      creators: [], // Array of { name, logo }
       available: true
     }});
   }
@@ -52,21 +53,26 @@ router.put('/stats', requireAdmin, async (req, res) => {
 // PUT /api/portfolio/content
 router.put('/content', requireAdmin, async (req, res) => {
   try {
-    const { tagline, bio1, bio2, skills, marqueeText, available } = req.body;
+    const { tagline, bio1, bio2, skills, marqueeText, creators, available } = req.body;
+    
+    // Fetch current data first to merge
     const settings = await getSettings();
+    const newData = { ...settings.data };
     
-    if (tagline !== undefined)   settings.data.tagline   = tagline;
-    if (bio1    !== undefined)   settings.data.bio1      = bio1;
-    if (bio2    !== undefined)   settings.data.bio2      = bio2;
-    if (skills  !== undefined)   settings.data.skills    = skills;
-    if (marqueeText !== undefined) settings.data.marqueeText = marqueeText;
-    if (available !== undefined) settings.data.available = available;
+    if (tagline !== undefined)   newData.tagline   = tagline;
+    if (bio1    !== undefined)   newData.bio1      = bio1;
+    if (bio2    !== undefined)   newData.bio2      = bio2;
+    if (skills  !== undefined)   newData.skills    = skills;
+    if (marqueeText !== undefined) newData.marqueeText = marqueeText;
+    if (creators !== undefined) newData.creators = creators;
+    if (available !== undefined) newData.available = available;
     
-    settings.markModified('data');
-    await settings.save();
+    await Settings.updateOne({ key: 'global' }, { $set: { data: newData } });
+    
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ success: false, error: 'Database error' });
+    console.error('Portfolio update error:', error);
+    res.status(500).json({ success: false, error: 'Database error', details: error.message });
   }
 });
 

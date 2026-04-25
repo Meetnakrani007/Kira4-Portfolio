@@ -15,10 +15,11 @@ let serviceState = {
   lastManualRefreshAt: null,
   lastPoolRebuildAt: null,
 };
-let quotaDailyUsage = 0;
-let lastResetDate = new Date().toDateString();
-let activeNoChangeCount = 0;
 let nextActiveRefreshAt = Date.now();
+let activeNoChangeCount = 0;
+let lastResetDate = new Date().toDateString();
+let quotaDailyUsage = 0;
+let youtubeLogs = []; // In-memory buffer
 
 /** Helper to get or create settings */
 async function getSettings(key, defaultValue = {}) {
@@ -86,7 +87,7 @@ function extractVideoId(url) {
 
 async function getYouTubeTasks() {
   try {
-    const works = await Work.find({ type: { $in: ['video', 'short', 'clip'] } }).lean();
+    const works = await Work.find({ type: { $in: ['video', 'short', 'clip'] } }).sort({ createdAt: -1 }).lean();
     const ytProjects = works.filter(w => extractVideoId(w.link));
 
     const active = ytProjects.slice(0, 15);
@@ -137,6 +138,7 @@ async function fetchYouTubeStats(ids, options = { force: false }) {
   if (today !== lastResetDate) {
     quotaDailyUsage = 0;
     lastResetDate = today;
+    await saveYoutubeStats();
   }
 
   if (quotaDailyUsage >= 8000) {
@@ -160,6 +162,7 @@ async function fetchYouTubeStats(ids, options = { force: false }) {
     quotaDailyUsage += 1;
     summary.quotaUsed += 1;
 
+    const startTime = Date.now();
     try {
       const res = await axios.get(API_URL, {
         params: {
@@ -169,6 +172,7 @@ async function fetchYouTubeStats(ids, options = { force: false }) {
         },
       });
 
+      const responseTime = Date.now() - startTime;
       const items = res.data.items || [];
       let updated = false;
       items.forEach(item => {
@@ -195,12 +199,26 @@ async function fetchYouTubeStats(ids, options = { force: false }) {
       }
 
       summary.fetched += chunk.length;
+      await addYoutubeLog('success', `Fetched ${chunk.length} videos, updated ${items.length} records.`, {
+        responseTime,
+        units: 1,
+        statusCode: 200
+      });
     } catch (e) {
-      console.error('Error fetching YouTube API', e.message || e);
+      const responseTime = Date.now() - startTime;
+      const statusCode = e.response?.status || 500;
+      const errMsg = e.response?.data?.error?.message || e.message || e;
+      console.error('Error fetching YouTube API', errMsg);
+      await addYoutubeLog('error', `API Fetch Error: ${errMsg}`, {
+        responseTime,
+        units: 1,
+        statusCode
+      });
     }
   }
 
   summary.dailyQuota = quotaDailyUsage;
+  await saveYoutubeStats(); // Persist usage after chunks
   return summary;
 }
 
@@ -275,9 +293,76 @@ async function refreshYouTubeData({ includeArchive = true, force = false } = {})
   };
 }
 
+async function loadYoutubeStats() {
+  try {
+    const stats = await getSettings('youtube_stats', { quotaDailyUsage: 0, lastResetDate: new Date().toDateString() });
+    quotaDailyUsage = stats.data.quotaDailyUsage || 0;
+    lastResetDate = stats.data.lastResetDate || new Date().toDateString();
+    
+    // Check for daily reset immediately on load
+    const today = new Date().toDateString();
+    if (today !== lastResetDate) {
+      quotaDailyUsage = 0;
+      lastResetDate = today;
+      await saveYoutubeStats();
+    }
+    console.log(`🟢 YouTube stats loaded: ${quotaDailyUsage} units used today.`);
+  } catch (e) {
+    console.error('Error loading YouTube stats from MongoDB', e);
+  }
+}
+
+async function saveYoutubeStats() {
+  try {
+    const stats = await getSettings('youtube_stats', {});
+    stats.data = { quotaDailyUsage, lastResetDate };
+    stats.markModified('data');
+    await stats.save();
+  } catch (e) {
+    console.error('Error saving YouTube stats to MongoDB', e);
+  }
+}
+
+async function addYoutubeLog(type, message, details = {}) {
+  try {
+    const logEntry = {
+      type,
+      message,
+      timestamp: new Date().toISOString(),
+      ...details
+    };
+    youtubeLogs.unshift(logEntry); // Add to start
+    if (youtubeLogs.length > 50) youtubeLogs = youtubeLogs.slice(0, 50); // Keep last 50
+    
+    // Emit via Socket.IO if available
+    if (global.io) {
+      global.io.emit('youtube_log', logEntry);
+      global.io.emit('youtube_status_update', await getYouTubeStatus());
+    }
+
+    const settings = await getSettings('youtube_logs', []);
+    settings.data = youtubeLogs;
+    settings.markModified('data');
+    await settings.save();
+  } catch (e) {
+    console.error('Error saving YouTube log:', e);
+  }
+}
+
+async function loadYoutubeLogs() {
+  try {
+    const settings = await getSettings('youtube_logs', []);
+    youtubeLogs = settings.data || [];
+  } catch (e) {
+    console.error('Error loading YouTube logs:', e);
+  }
+}
+
 async function initCronJobs() {
   await loadCache();
   await loadState();
+  await loadYoutubeStats();
+  await loadYoutubeLogs();
 
   cron.schedule('* * * * *', async () => {
     const result = await refreshActiveVideoData(false);
@@ -344,10 +429,22 @@ function getEnrichedViews(projects) {
   });
 }
 
+async function updateQuotaUsage(usage) {
+  quotaDailyUsage = usage;
+  await saveYoutubeStats();
+  await addYoutubeLog('info', `Quota manually synced to ${usage} units.`);
+}
+
+function getYoutubeLogs() {
+  return youtubeLogs;
+}
+
 module.exports = {
   initCronJobs,
   getEnrichedViews,
   extractVideoId,
   refreshYouTubeData,
   getYouTubeStatus,
+  updateQuotaUsage,
+  getYoutubeLogs,
 };

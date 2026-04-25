@@ -49,6 +49,8 @@ export const adminLogin    = (email, password) => api.post('/admin/login', { ema
 export const verifyAdmin   = ()                => api.post('/admin/verify')
 export const refreshYouTube = ()              => api.post('/admin/youtube/refresh')
 export const getYouTubeStatus = ()            => api.get('/admin/youtube/status')
+export const updateYoutubeQuota = (usage)      => api.put('/admin/youtube/quota', { usage })
+export const getYoutubeLogs = ()              => api.get('/admin/youtube/logs')
 
 // ─── Admin — Messages ───
 export const getMessages   = ()           => api.get('/admin/messages')

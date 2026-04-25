@@ -18,9 +18,28 @@ export default function AdminOverview({ mode = 'dashboard', onNavigate }) {
   const [refreshing, setRefreshing] = useState(false)
   const [ytStatus, setYtStatus] = useState(null)
   const [statusLoading, setStatusLoading] = useState(false)
+  const [ytLogs, setYtLogs] = useState([])
 
   useEffect(() => {
     load()
+
+    // Connect to Socket.IO for real-time logs
+    let socket;
+    import('socket.io-client').then(({ io }) => {
+      socket = io(window.location.origin);
+      
+      socket.on('youtube_log', (log) => {
+        setYtLogs(prev => [log, ...prev].slice(0, 50));
+      });
+
+      socket.on('youtube_status_update', (status) => {
+        setYtStatus(status);
+      });
+    });
+
+    return () => {
+      if (socket) socket.disconnect();
+    };
   }, [])
 
   const load = async () => {
@@ -31,8 +50,21 @@ export default function AdminOverview({ mode = 'dashboard', onNavigate }) {
       if (d.stats) setStats(d.stats)
       getPortfolioData()
       loadYouTubeStatus()
+      loadYouTubeLogs()
     } catch (e) {
       console.error(e)
+    }
+  }
+
+  const loadYouTubeLogs = async () => {
+    try {
+      const { getYoutubeLogs } = await import('../../api')
+      const res = await getYoutubeLogs()
+      if (res.data?.success) {
+        setYtLogs(res.data.data)
+      }
+    } catch (e) {
+      console.error('Failed to load logs', e)
     }
   }
 
@@ -112,6 +144,25 @@ export default function AdminOverview({ mode = 'dashboard', onNavigate }) {
     }
   }
 
+  const handleSyncQuota = async () => {
+    const val = prompt('Enter current usage units from Google Cloud Console:', ytStatus?.dailyQuotaUsage || '0')
+    if (val === null) return
+    const num = parseInt(val, 10)
+    if (isNaN(num)) return alert('Please enter a valid number')
+
+    try {
+      const { updateYoutubeQuota } = await import('../../api')
+      await updateYoutubeQuota(num)
+      setStatusMsg('Quota usage synced!')
+      loadYouTubeStatus()
+    } catch (e) {
+      console.error(e)
+      setStatusMsg('Failed to sync quota')
+    } finally {
+      setTimeout(() => setStatusMsg(''), 3000)
+    }
+  }
+
   if (!data) return <div>Loading...</div>
 
   return (
@@ -127,30 +178,56 @@ export default function AdminOverview({ mode = 'dashboard', onNavigate }) {
         </p>
         <div className="yt-status-panel">
           <div className="yt-status-card yt-status-card--highlight">
-            <div className="yt-status-label">Daily quota usage</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div className="yt-status-label">Global Quota Usage (Daily)</div>
+              <button 
+                onClick={handleSyncQuota} 
+                className="btn-sync-small"
+                title="Sync with Google Cloud Console"
+              >
+                Sync with Console
+              </button>
+            </div>
             <div className="yt-status-bar-wrap">
               <div className="yt-status-bar" style={{ width: ytStatus ? `${Math.min(100, (ytStatus.dailyQuotaUsage / ytStatus.dailyQuotaLimit) * 100)}%` : '0%' }} />
             </div>
             <div className="yt-status-meter">
-              <span>{ytStatus ? `${ytStatus.dailyQuotaUsage} / ${ytStatus.dailyQuotaLimit} units` : 'Loading...'}</span>
-              <span>Throttle at {ytStatus ? ytStatus.throttleAt : '8000'}/day</span>
+              <span><strong>{ytStatus?.dailyQuotaUsage || 0}</strong> / {ytStatus?.dailyQuotaLimit || 10000} units used</span>
+              <span>Throttle Active at {ytStatus?.throttleAt || 8000}u</span>
+            </div>
+          </div>
+          
+          <div className="yt-status-grid">
+            <div className="yt-status-tile">
+              <span className="yt-tile-label">Active Pool</span>
+              <div className="yt-tile-value">{ytStatus?.activePoolSize || 0} <small>/ {ytStatus?.activePoolLimit || 15}</small></div>
+              <div className="yt-status-subline">Refresh: every {ytStatus ? (ytStatus.refreshIntervalMs / 60000).toFixed(0) : '1'}m</div>
+            </div>
+            <div className="yt-status-tile">
+              <span className="yt-tile-label">Archive Batches</span>
+              <div className="yt-tile-value">{ytStatus?.currentArchiveBatch || 1} <small>/ {ytStatus?.archiveBatches || 1}</small></div>
+              <div className="yt-status-subline">Daily rotation @ 3 AM</div>
+            </div>
+            <div className="yt-status-tile">
+              <span className="yt-tile-label">Next Refresh</span>
+              <div className="yt-tile-value">{ytStatus ? new Date(ytStatus.nextActiveRefreshAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}</div>
+              <div className="yt-status-subline">{ytStatus?.noChangeStreak > 0 ? `Backoff: ${ytStatus.noChangeStreak}x idle` : 'Normal tracking'}</div>
             </div>
           </div>
 
-          <div className="yt-status-grid">
-            <div className="yt-status-tile">Active pool<br /><strong>{ytStatus ? `${ytStatus.activePoolSize} / ${ytStatus.activePoolLimit}` : '—'}</strong></div>
-            <div className="yt-status-tile">Refresh interval<br /><strong>{ytStatus ? `${Math.round(ytStatus.refreshIntervalMs / 60000)}m` : '—'}</strong></div>
-            <div className="yt-status-tile">No-change streak<br /><strong>{ytStatus ? `${ytStatus.noChangeStreak}x` : '—'}</strong></div>
-            <div className="yt-status-tile">Archive batches<br /><strong>{ytStatus ? `${ytStatus.archiveBatches} batch` : '—'}</strong></div>
-            <div className="yt-status-tile">Current batch<br /><strong>{ytStatus ? `#${ytStatus.currentArchiveBatch}` : '—'}</strong></div>
-            <div className="yt-status-tile">Batch size<br /><strong>{ytStatus ? `${ytStatus.batchSize} videos` : '—'}</strong></div>
-          </div>
-
-          <div className="yt-status-meta">
-            <div>{ytStatus ? `Last active refresh: ${ytStatus.lastActiveRefreshAt || 'N/A'}` : 'Loading...'}</div>
-            <div>{ytStatus ? `Last archive refresh: ${ytStatus.lastArchiveRefreshAt || 'N/A'}` : ''}</div>
-            <div>{ytStatus ? `Last pool rebuild: ${ytStatus.lastPoolRebuildAt || 'N/A'}` : ''}</div>
-            <div>{ytStatus ? `Last manual refresh: ${ytStatus.lastManualRefreshAt || 'N/A'}` : ''}</div>
+          <div className="yt-status-meta-grid">
+            <div className="yt-meta-item">
+              <span>Last Active Refresh</span>
+              <strong>{ytStatus?.lastActiveRefreshAt ? new Date(ytStatus.lastActiveRefreshAt).toLocaleTimeString() : 'N/A'}</strong>
+            </div>
+            <div className="yt-meta-item">
+              <span>Last Archive Refresh</span>
+              <strong>{ytStatus?.lastArchiveRefreshAt ? new Date(ytStatus.lastArchiveRefreshAt).toLocaleTimeString() : 'N/A'}</strong>
+            </div>
+            <div className="yt-meta-item">
+              <span>Pool Rebuild</span>
+              <strong>{ytStatus?.lastPoolRebuildAt ? new Date(ytStatus.lastPoolRebuildAt).toLocaleTimeString() : 'N/A'}</strong>
+            </div>
           </div>
 
           <div className="yt-status-action-row">
@@ -159,6 +236,31 @@ export default function AdminOverview({ mode = 'dashboard', onNavigate }) {
             </button>
             <div className="yt-status-note">Uses 1 API unit per 50 videos — only admins can trigger this.</div>
           </div>
+        </div>
+
+        {/* ─── SYSTEM LOGS ─── */}
+        <div className="yt-logs-panel">
+           <div className="yt-status-label" style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between' }}>
+             <span>Live System Logs</span>
+             <button onClick={loadYouTubeLogs} className="btn-sync-small">Refresh Logs</button>
+           </div>
+           <div className="yt-logs-container">
+             {ytLogs.length === 0 ? (
+               <div className="yt-log-item">No logs available.</div>
+             ) : (
+               ytLogs.map((log, i) => (
+                 <div key={i} className={`yt-log-item yt-log-${log.type}`}>
+                   <span className="yt-log-ts">[{new Date(log.timestamp).toLocaleTimeString()}]</span>
+                   <span className="yt-log-msg">{log.message}</span>
+                   {log.responseTime !== undefined && (
+                     <span className="yt-log-meta">
+                       {log.responseTime}ms · {log.units}u {log.statusCode && `· ${log.statusCode}`}
+                     </span>
+                   )}
+                 </div>
+               ))
+             )}
+           </div>
         </div>
       </header>
 
@@ -221,26 +323,6 @@ export default function AdminOverview({ mode = 'dashboard', onNavigate }) {
         <button className="btn btn-primary" onClick={handleStatsSave}>Save Stats</button>
       </div>
 
-      <div className="admin-glass-form-card" style={{ marginTop: '24px' }}>
-        <h3 className="admin-glass-form-title">Update Content</h3>
-        <div className="admin-form-group">
-            <label className="admin-label">Tagline</label>
-            <input className="admin-input" value={content.tagline} onChange={e => setContent({...content, tagline: e.target.value})} />
-        </div>
-        <div className="admin-form-group">
-            <label className="admin-label">Bio (Paragraph 1)</label>
-            <textarea className="admin-input admin-textarea" value={content.bio1} onChange={e => setContent({...content, bio1: e.target.value})} />
-        </div>
-        <div className="admin-form-group">
-            <label className="admin-label">Bio (Paragraph 2)</label>
-            <textarea className="admin-input admin-textarea" value={content.bio2} onChange={e => setContent({...content, bio2: e.target.value})} />
-        </div>
-        <div className="admin-form-group">
-            <label className="admin-label">Skills (Comma separated)</label>
-            <input className="admin-input" value={content.skills} onChange={e => setContent({...content, skills: e.target.value})} />
-        </div>
-        <button className="btn btn-primary" onClick={handleContentSave}>Save Content</button>
-      </div>
       </>
       )}
       

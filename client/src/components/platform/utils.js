@@ -63,6 +63,9 @@ export function thumbUrl(item) {
     return `https://i.ytimg.com/vi/${vid}/maxresdefault.jpg`
   }
   
+  // Fallback for comparison sliders
+  if (item.afterImage || item.beforeImage) return item.afterImage || item.beforeImage
+
   return ''
 }
 

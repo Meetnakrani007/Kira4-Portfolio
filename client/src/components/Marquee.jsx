@@ -1,14 +1,22 @@
 import './Marquee.css'
 
-const ITEMS = [
+const DEFAULT_ITEMS = [
   'THUMBNAIL DESIGN', 'VIDEO EDITING', 'COLOR GRADING',
   'MOTION GRAPHICS', 'BRAND IDENTITY', 'SOCIAL MEDIA',
 ]
 
 export default function Marquee({ items }) {
-  const displayItems = items 
-    ? items.split(',').map(s => s.trim()).filter(Boolean)
-    : ITEMS
+  const displayItems = useMemo(() => {
+    if (!items) return DEFAULT_ITEMS.map(s => ({ name: s, logo: '' }))
+    
+    if (Array.isArray(items)) {
+      // It's already the new creators array
+      return items.map(item => typeof item === 'string' ? { name: item, logo: '' } : item)
+    }
+    
+    // It's the legacy comma-separated string
+    return items.split(',').map(s => ({ name: s.trim(), logo: '' })).filter(c => c.name)
+  }, [items])
 
   // Ensure we have enough items to fill the track and loop seamlessly
   let list = [...displayItems]
@@ -24,7 +32,12 @@ export default function Marquee({ items }) {
       <div className="marquee-track">
         {doubled.map((item, i) => (
           <span key={i} className="marquee-item">
-            {item}
+            {item.logo && (
+              <div className="marquee-logo-outer">
+                <img src={item.logo} alt="" className="marquee-logo" />
+              </div>
+            )}
+            <span className="marquee-name">{item.name}</span>
             <span className="marquee-dot">✦</span>
           </span>
         ))}
@@ -32,3 +45,5 @@ export default function Marquee({ items }) {
     </div>
   )
 }
+
+import { useMemo } from 'react'

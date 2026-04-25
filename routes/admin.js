@@ -145,7 +145,7 @@ router.get('/overview', requireAdmin, async (req, res) => {
       success: true,
       data: {
         totalWork: work.length,
-        totalThumbnails: work.filter(w => (!w.type || w.type === 'thumbnail')).length,
+        totalThumbnails: work.filter(w => w.type === 'thumbnail' || w.type === 'slider' || !w.type).length,
         totalVideos: work.filter(w => w.type === 'video').length,
         totalShorts: work.filter(w => w.type === 'short' || w.type === 'clip').length,
         totalMessages: messagesSettings.data.length,
@@ -177,6 +177,29 @@ router.get('/youtube/status', requireAdmin, async (req, res) => {
   } catch (e) {
     console.error('YouTube status error', e);
     res.status(500).json({ success: false, error: 'Failed to read YouTube status.' });
+  }
+});
+
+router.put('/youtube/quota', requireAdmin, async (req, res) => {
+  try {
+    const { usage } = req.body;
+    const { updateQuotaUsage } = require('../services/youtube');
+    await updateQuotaUsage(Number(usage));
+    res.json({ success: true });
+  } catch (e) {
+    console.error('YouTube quota update error', e);
+    res.status(500).json({ success: false, error: 'Failed to update quota.' });
+  }
+});
+
+router.get('/youtube/logs', requireAdmin, async (req, res) => {
+  try {
+    const { getYoutubeLogs } = require('../services/youtube');
+    const logs = getYoutubeLogs();
+    res.json({ success: true, data: logs });
+  } catch (e) {
+    console.error('YouTube logs error', e);
+    res.status(500).json({ success: false, error: 'Failed to fetch logs.' });
   }
 });
 
